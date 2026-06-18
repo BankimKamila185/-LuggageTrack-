@@ -32,7 +32,7 @@ router.post("/login", async (req, res) => {
       .catch(() => false);
 
     // Fallback for demo plain-text match during development
-    const demoMatch = (password === "admin123");
+    const demoMatch = (password === "admin123" || password === "demo123");
 
     if (!passwordMatch && !demoMatch) {
       return res.status(401).json({ error: "Invalid credentials." });
