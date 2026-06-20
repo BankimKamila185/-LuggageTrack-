@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Server, Activity, ShieldAlert, Cpu, HardDrive, Wifi, CheckCircle2 } from "lucide-react";
+import { Server, Activity, ShieldAlert, Cpu, HardDrive, Wifi, CheckCircle2, RefreshCw } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { apiService } from "../services/api";
 
@@ -7,6 +7,15 @@ const Monitoring = () => {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState([]);
+
+  const [uiRefreshEnabled, setUiRefreshEnabled] = useState(() => {
+    const saved = localStorage.getItem("luggagetrack_ui_refresh_enabled");
+    return saved === null ? true : saved === "true";
+  });
+  const [uiRefreshInterval, setUiRefreshInterval] = useState(() => {
+    const saved = localStorage.getItem("luggagetrack_ui_refresh_interval");
+    return saved === null ? 3000 : parseInt(saved, 10);
+  });
 
   const fetchTelemetry = async (init = false) => {
     try {
@@ -27,13 +36,23 @@ const Monitoring = () => {
   useEffect(() => {
     fetchTelemetry(true);
 
-    // Dynamic real-time update interval (every 3 seconds)
-    const interval = setInterval(() => {
-      fetchTelemetry(false);
-    }, 3000);
+    let interval = null;
+    if (uiRefreshEnabled) {
+      interval = setInterval(() => {
+        fetchTelemetry(false);
+      }, uiRefreshInterval);
+    }
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [uiRefreshEnabled, uiRefreshInterval]);
+
+  const toggleUIRefresh = () => {
+    const nextVal = !uiRefreshEnabled;
+    setUiRefreshEnabled(nextVal);
+    localStorage.setItem("luggagetrack_ui_refresh_enabled", String(nextVal));
+  };
 
   if (loading) {
     return (
@@ -105,6 +124,41 @@ const Monitoring = () => {
         <div className="flex items-center gap-2 self-start bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-full text-xs font-semibold">
           <CheckCircle2 className="h-4 w-4" />
           <span>Gateway Status: Fully Operational</span>
+        </div>
+      </div>
+
+      {/* Polling Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/30 p-4 backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Auto-Refresh:</span>
+          <div className="flex items-center gap-2 bg-slate-950/60 rounded-lg p-1 border border-slate-800">
+            <button
+              onClick={toggleUIRefresh}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                uiRefreshEnabled
+                  ? "bg-blue-600 text-white"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              {uiRefreshEnabled ? "Active" : "Paused"}
+            </button>
+            {uiRefreshEnabled && (
+              <span className="text-[10px] text-slate-500 px-1 font-mono">
+                {uiRefreshInterval / 1000}s
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => fetchTelemetry(false)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-850 hover:bg-slate-800 text-xs font-semibold text-slate-200 transition-colors cursor-pointer border border-slate-800"
+          >
+            <RefreshCw className="h-3.5 w-3.5 animate-transition" />
+            Refresh
+          </button>
+        </div>
+
+        <div className="text-[10px] text-slate-500 font-mono">
+          Last sync: {new Date().toLocaleTimeString()}
         </div>
       </div>
 

@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { User, Shield, Bell, Wrench, Save, Check } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { User, Shield, Bell, Wrench, Save, Check, Sliders } from "lucide-react";
 import { apiService } from "../services/api";
 
 const Settings = () => {
@@ -39,6 +39,84 @@ const Settings = () => {
     maxWeight: "32",
     autoArchive: true
   });
+
+  const [simulatorConfig, setSimulatorConfig] = useState({
+    enabled: true,
+    intervalMs: 5000
+  });
+
+  const [pollingConfig, setPollingConfig] = useState(() => {
+    const savedEnabled = localStorage.getItem("luggagetrack_ui_refresh_enabled");
+    const savedInterval = localStorage.getItem("luggagetrack_ui_refresh_interval");
+    return {
+      enabled: savedEnabled === null ? true : savedEnabled === "true",
+      intervalMs: savedInterval === null ? 3000 : parseInt(savedInterval, 10)
+    };
+  });
+
+  useEffect(() => {
+    apiService.getSimulatorConfig()
+      .then((res) => {
+        if (res.data) {
+          setSimulatorConfig({
+            enabled: res.data.enabled,
+            intervalMs: res.data.intervalMs
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load simulator config:", err);
+      });
+  }, []);
+
+  const handleSimulatorToggle = async () => {
+    const newEnabled = !simulatorConfig.enabled;
+    setSimulatorConfig(prev => ({ ...prev, enabled: newEnabled }));
+    try {
+      await apiService.updateSimulatorConfig({
+        enabled: newEnabled,
+        intervalMs: simulatorConfig.intervalMs
+      });
+      setSuccessMessage("Baggage simulator status updated.");
+      setTimeout(() => setSuccessMessage(""), 2000);
+    } catch (err) {
+      setError("Failed to update simulator status.");
+      setSimulatorConfig(prev => ({ ...prev, enabled: !newEnabled }));
+      setTimeout(() => setError(""), 3000);
+    }
+  };
+
+  const handleSimulatorIntervalChange = async (e) => {
+    const newInterval = parseInt(e.target.value, 10);
+    setSimulatorConfig(prev => ({ ...prev, intervalMs: newInterval }));
+    try {
+      await apiService.updateSimulatorConfig({
+        enabled: simulatorConfig.enabled,
+        intervalMs: newInterval
+      });
+      setSuccessMessage("Baggage simulator speed updated.");
+      setTimeout(() => setSuccessMessage(""), 2000);
+    } catch (err) {
+      setError("Failed to update simulator speed.");
+      setTimeout(() => setError(""), 3000);
+    }
+  };
+
+  const handlePollingToggle = () => {
+    const newEnabled = !pollingConfig.enabled;
+    setPollingConfig(prev => ({ ...prev, enabled: newEnabled }));
+    localStorage.setItem("luggagetrack_ui_refresh_enabled", String(newEnabled));
+    setSuccessMessage("UI auto-refresh status updated.");
+    setTimeout(() => setSuccessMessage(""), 2000);
+  };
+
+  const handlePollingIntervalChange = (e) => {
+    const newInterval = parseInt(e.target.value, 10);
+    setPollingConfig(prev => ({ ...prev, intervalMs: newInterval }));
+    localStorage.setItem("luggagetrack_ui_refresh_interval", String(newInterval));
+    setSuccessMessage("UI auto-refresh frequency updated.");
+    setTimeout(() => setSuccessMessage(""), 2000);
+  };
 
   const handleProfileSubmit = (e) => {
     e.preventDefault();
@@ -172,6 +250,17 @@ const Settings = () => {
           >
             <Wrench className="h-4 w-4" />
             System Variables
+          </button>
+          <button
+            onClick={() => setActiveSubTab("simulator")}
+            className={`flex w-full items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer ${
+              activeSubTab === "simulator"
+                ? "bg-blue-600 text-white"
+                : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+            }`}
+          >
+            <Sliders className="h-4 w-4" />
+            Simulator & Polling
           </button>
         </aside>
 
@@ -424,6 +513,107 @@ const Settings = () => {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* SIMULATOR & POLLING SETTINGS */}
+          {activeSubTab === "simulator" && (
+            <div className="space-y-6">
+              <h3 className="font-heading text-lg font-bold text-white border-b border-slate-800 pb-3">
+                Simulator & Polling Configurations
+              </h3>
+              
+              {/* Baggage Simulator Backend Settings */}
+              <div className="space-y-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-white">Baggage Status Simulator (Backend)</h4>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Control the backend real-time baggage simulator which automatically generates status changes and updates baggage history.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-4 p-4 border border-slate-800 rounded-lg bg-slate-950/40">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-semibold text-white">Simulator Status</span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Toggle the simulation runner on or off</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={simulatorConfig.enabled}
+                        onChange={handleSimulatorToggle}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-white animate-transition"></div>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Simulator Interval (Speed)
+                    </label>
+                    <select
+                      value={simulatorConfig.intervalMs}
+                      onChange={handleSimulatorIntervalChange}
+                      disabled={!simulatorConfig.enabled}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 transition-colors disabled:opacity-40"
+                    >
+                      <option value={1000}>Fast (1 second)</option>
+                      <option value={3000}>Quick (3 seconds)</option>
+                      <option value={5000}>Normal (5 seconds)</option>
+                      <option value={10000}>Slow (10 seconds)</option>
+                      <option value={20000}>Very Slow (20 seconds)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* UI Auto-Refresh Settings */}
+              <div className="space-y-4 pt-4 border-t border-slate-800">
+                <div>
+                  <h4 className="text-sm font-semibold text-white">UI Auto-Refresh (Frontend)</h4>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Control how often the Dashboard and Telemetry pages pull the latest logs, baggage lists, and system health metrics.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-4 p-4 border border-slate-800 rounded-lg bg-slate-950/40">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-semibold text-white">UI Polling Status</span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Toggle automatic background data refresh</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={pollingConfig.enabled}
+                        onChange={handlePollingToggle}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-white animate-transition"></div>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Auto-Refresh Frequency
+                    </label>
+                    <select
+                      value={pollingConfig.intervalMs}
+                      onChange={handlePollingIntervalChange}
+                      disabled={!pollingConfig.enabled}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 transition-colors disabled:opacity-40"
+                    >
+                      <option value={1000}>Fast (1 second)</option>
+                      <option value={3000}>Normal (3 seconds)</option>
+                      <option value={5000}>Relaxed (5 seconds)</option>
+                      <option value={10000}>Slow (10 seconds)</option>
+                      <option value={30000}>Infrequent (30 seconds)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

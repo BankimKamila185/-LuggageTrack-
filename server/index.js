@@ -101,10 +101,96 @@ app.use("/api/baggage",      baggageRoutes);
 app.use("/api/users",        usersRoutes);
 app.use("/api/lost-reports", lostReportRoutes);
 
+// ── Simulator Config Endpoints ────────────────────────────────
+let simulatorEnabled = true;
+let simulatorIntervalMs = 5000;
+let simulatorTimer = null;
+
+app.get("/api/simulator/config", (_req, res) => {
+  res.json({
+    enabled: simulatorEnabled,
+    intervalMs: simulatorIntervalMs
+  });
+});
+
+app.post("/api/simulator/config", (req, res) => {
+  const { enabled, intervalMs } = req.body;
+  if (typeof enabled === "boolean") {
+    simulatorEnabled = enabled;
+  }
+  if (typeof intervalMs === "number" && intervalMs >= 500) {
+    simulatorIntervalMs = intervalMs;
+  }
+  startBaggageSimulator();
+  res.json({
+    status: "success",
+    config: {
+      enabled: simulatorEnabled,
+      intervalMs: simulatorIntervalMs
+    }
+  });
+});
+
 // ── 404 fallback ─────────────────────────────────────────────
 app.use((_req, res) => {
   res.status(404).json({ error: "Route not found." });
 });
+
+// ── Baggage Status Simulator (Real-time Simulation) ───────────
+const runSimulatorStep = async () => {
+  if (!simulatorEnabled) return;
+  
+  const statusFlow = {
+    "Checked In": "Security Cleared",
+    "Security Cleared": "Loaded",
+    "Loaded": "In Transit",
+    "In Transit": "Delivered",
+    "Delivered": "Checked In",
+    "Delayed": "Security Cleared",
+    "Lost": "Checked In",
+    "Loaded Into Aircraft": "In Transit",
+    "Handed Over": "Checked In",
+    "Arrived At Destination": "Delivered"
+  };
+
+  const users = ["Sarah Connor", "David Kim", "Elena Rostova", "Maria Santos", "Tom Bradley"];
+
+  try {
+    const { rows: baggageList } = await pool.query("SELECT id, status, passenger_name FROM baggage");
+    if (baggageList.length === 0) return;
+
+    const randomBag = baggageList[Math.floor(Math.random() * baggageList.length)];
+    const currentStatus = randomBag.status;
+    const newStatus = statusFlow[currentStatus] || "Checked In";
+    const passengerName = randomBag.passenger_name;
+    const user = users[Math.floor(Math.random() * users.length)];
+
+    await pool.query(
+      "UPDATE baggage SET status = $1, last_updated = NOW() WHERE id = $2",
+      [newStatus, randomBag.id]
+    );
+
+    await pool.query(
+      `INSERT INTO activity_log (action, details, username, time)
+       VALUES ('Status Updated', $1, $2, 'Just now')`,
+      [`${randomBag.id} (${passengerName}) updated to '${newStatus}'`, user]
+    );
+
+    console.log(`[SIMULATOR] ${randomBag.id} (${passengerName}) status updated to '${newStatus}' by ${user}`);
+  } catch (err) {
+    console.error("[SIMULATOR ERROR]", err.message);
+  }
+};
+
+const startBaggageSimulator = () => {
+  if (simulatorTimer) {
+    clearInterval(simulatorTimer);
+    simulatorTimer = null;
+  }
+  if (simulatorEnabled) {
+    simulatorTimer = setInterval(runSimulatorStep, simulatorIntervalMs);
+  }
+};
 
 // ── Start Server ──────────────────────────────────────────────
 const startServer = async () => {
@@ -113,6 +199,7 @@ const startServer = async () => {
     try {
       await pool.query("SELECT 1");
       console.log("[DB] PostgreSQL connected ✓");
+      startBaggageSimulator();
       break;
     } catch (err) {
       retries--;
@@ -132,3 +219,4 @@ const startServer = async () => {
 };
 
 startServer();
+

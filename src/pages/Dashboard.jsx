@@ -12,7 +12,8 @@ import {
   Hand,
   MapPin,
   Package,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from "lucide-react";
 import {
   BarChart,
@@ -40,23 +41,130 @@ const Dashboard = () => {
   const [activity, setActivity] = useState([]);
   const [health, setHealth] = useState(null);
 
+  const [uiRefreshEnabled, setUiRefreshEnabled] = useState(() => {
+    const saved = localStorage.getItem("luggagetrack_ui_refresh_enabled");
+    return saved === null ? true : saved === "true";
+  });
+  const [uiRefreshInterval, setUiRefreshInterval] = useState(() => {
+    const saved = localStorage.getItem("luggagetrack_ui_refresh_interval");
+    return saved === null ? 3000 : parseInt(saved, 10);
+  });
+
+  const [simulatorEnabled, setSimulatorEnabled] = useState(true);
+  const [simulatorInterval, setSimulatorInterval] = useState(5000);
+
+  const fetchData = async (init = false) => {
+    try {
+      if (init) setLoading(true);
+      const [bagRes, actRes, healthRes] = await Promise.all([
+        apiService.getBaggage(),
+        apiService.getRecentActivity(),
+        apiService.getHealth()
+      ]);
+      setBaggage(bagRes.data);
+      setActivity(actRes.data);
+      setHealth(healthRes.data);
+    } catch (err) {
+      console.error("Dashboard data fetch error:", err);
+    } finally {
+      if (init) setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const bagRes = await apiService.getBaggage();
-        const actRes = await apiService.getRecentActivity();
-        const healthRes = await apiService.getHealth();
-        setBaggage(bagRes.data);
-        setActivity(actRes.data);
-        setHealth(healthRes.data);
-      } catch (err) {
-        console.error("Dashboard data fetch error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
+    apiService.getSimulatorConfig()
+      .then((res) => {
+        if (res.data) {
+          setSimulatorEnabled(res.data.enabled);
+          setSimulatorInterval(res.data.intervalMs);
+        }
+      })
+      .catch((err) => console.error("Error loading simulator config on dashboard:", err));
   }, []);
+
+  useEffect(() => {
+    fetchData(true);
+
+    let interval = null;
+    if (uiRefreshEnabled) {
+      interval = setInterval(() => {
+        fetchData(false);
+      }, uiRefreshInterval);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [uiRefreshEnabled, uiRefreshInterval]);
+
+  const toggleUIRefresh = () => {
+    const nextVal = !uiRefreshEnabled;
+    setUiRefreshEnabled(nextVal);
+    localStorage.setItem("luggagetrack_ui_refresh_enabled", String(nextVal));
+  };
+
+  const toggleSimulator = async () => {
+    const nextEnabled = !simulatorEnabled;
+    setSimulatorEnabled(nextEnabled);
+    try {
+      await apiService.updateSimulatorConfig({
+        enabled: nextEnabled,
+        intervalMs: simulatorInterval
+      });
+    } catch (err) {
+      console.error("Error updating simulator status:", err);
+      setSimulatorEnabled(!nextEnabled);
+    }
+  };
+
+  const changeSimulatorSpeed = async (e) => {
+    const nextInterval = parseInt(e.target.value, 10);
+    setSimulatorInterval(nextInterval);
+    try {
+      await apiService.updateSimulatorConfig({
+        enabled: simulatorEnabled,
+        intervalMs: nextInterval
+      });
+    } catch (err) {
+      console.error("Error updating simulator speed:", err);
+    }
+  };
+
+  const getStatusStyle = (status) => {
+    switch (status) {
+      case "Delivered":
+      case "Handed Over":
+      case "Arrived At Destination":
+        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+      case "In Transit":
+        return "bg-blue-500/10 text-blue-400 border-blue-500/20";
+      case "Checked In":
+        return "bg-slate-500/10 text-slate-300 border-slate-700";
+      case "Security Cleared":
+        return "bg-indigo-500/10 text-indigo-400 border-indigo-500/20";
+      case "Loaded":
+      case "Loaded Into Aircraft":
+        return "bg-purple-500/10 text-purple-400 border-purple-500/20";
+      case "Delayed":
+        return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+      case "Lost":
+        return "bg-rose-500/10 text-rose-400 border-rose-500/20";
+      default:
+        return "bg-slate-800 text-slate-400 border-slate-700";
+    }
+  };
+
+  const formatDate = (isoString) => {
+    if (!isoString) return "N/A";
+    const d = new Date(isoString);
+    return d.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
+  };
 
   if (loading) {
     return (
@@ -133,6 +241,76 @@ const Dashboard = () => {
           Manage Baggage
           <ArrowRight className="h-4 w-4" />
         </Link>
+      </div>
+
+      {/* Simulation & Dashboard Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/30 p-4 backdrop-blur-sm">
+        <div className="flex flex-wrap items-center gap-6">
+          {/* UI Polling Controls */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Auto-Refresh:</span>
+            <div className="flex items-center gap-2 bg-slate-950/60 rounded-lg p-1 border border-slate-800">
+              <button
+                onClick={toggleUIRefresh}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                  uiRefreshEnabled
+                    ? "bg-blue-600 text-white"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                {uiRefreshEnabled ? "Active" : "Paused"}
+              </button>
+              {uiRefreshEnabled && (
+                <span className="text-[10px] text-slate-500 px-1 font-mono">
+                  {uiRefreshInterval / 1000}s
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => fetchData(false)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-850 hover:bg-slate-800 text-xs font-semibold text-slate-200 transition-colors cursor-pointer border border-slate-800"
+            >
+              <RefreshCw className="h-3.5 w-3.5 animate-transition" />
+              Refresh
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-slate-800 hidden sm:block" />
+
+          {/* Backend Simulator Controls */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Simulator:</span>
+            <div className="flex items-center gap-2 bg-slate-950/60 rounded-lg p-1 border border-slate-800">
+              <button
+                onClick={toggleSimulator}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                  simulatorEnabled
+                    ? "bg-emerald-600 text-white"
+                    : "bg-rose-500/10 text-rose-400 hover:bg-rose-500/20"
+                }`}
+              >
+                {simulatorEnabled ? "Running" : "Stopped"}
+              </button>
+              
+              {simulatorEnabled && (
+                <select
+                  value={simulatorInterval}
+                  onChange={changeSimulatorSpeed}
+                  className="bg-transparent border-0 text-[10px] text-slate-300 font-mono focus:ring-0 cursor-pointer outline-none pr-4"
+                >
+                  <option value={1000} className="bg-slate-950">1s (Fast)</option>
+                  <option value={3000} className="bg-slate-950">3s</option>
+                  <option value={5000} className="bg-slate-950">5s (Normal)</option>
+                  <option value={10000} className="bg-slate-950">10s (Slow)</option>
+                </select>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="text-[10px] text-slate-500 font-mono">
+          Last sync: {new Date().toLocaleTimeString()}
+        </div>
       </div>
 
       {/* KPI Cards Grid — 8 cards */}
@@ -251,6 +429,72 @@ const Dashboard = () => {
               </BarChart>
             </ResponsiveContainer>
           </div>
+        </div>
+      </div>
+
+      {/* Live Baggage Telemetry Feeder (Data Table) */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6 backdrop-blur-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <h3 className="font-heading text-sm font-semibold tracking-wider text-slate-400 uppercase m-0">
+              Live Baggage Telemetry Feed
+            </h3>
+            <span className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full text-[10px] font-semibold">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live Ingestion Active
+            </span>
+          </div>
+          <Link
+            to="/baggage"
+            className="text-xs font-bold text-blue-500 hover:text-blue-400 transition-colors flex items-center gap-1"
+          >
+            View Full Inventory <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left text-xs text-slate-300">
+            <thead className="bg-slate-950/40 font-heading text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-800">
+              <tr>
+                <th className="px-4 py-3">Bag ID</th>
+                <th className="px-4 py-3">Passenger</th>
+                <th className="px-4 py-3">Flight</th>
+                <th className="px-4 py-3">Route</th>
+                <th className="px-4 py-3">Weight</th>
+                <th className="px-4 py-3">Current Status</th>
+                <th className="px-4 py-3 text-right">Last Updated</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {baggage.slice(0, 5).map((bag) => (
+                <tr key={bag.id} className="hover:bg-slate-950/20 transition-all duration-150">
+                  <td className="px-4 py-3 font-mono font-bold text-blue-400">
+                    {bag.id}
+                  </td>
+                  <td className="px-4 py-3 font-semibold text-white">
+                    {bag.passengerName}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-slate-300">
+                    {bag.flightNumber}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400">
+                    {bag.origin} &rarr; {bag.destination}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400">
+                    {bag.weight ? `${bag.weight} kg` : "N/A"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold ${getStatusStyle(bag.status)}`}>
+                      {bag.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-[10px] text-slate-500">
+                    {formatDate(bag.lastUpdated)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

@@ -114,6 +114,15 @@ export const apiService = {
 
   updateLostReport: async (id, updatedFields) => {
     return await api.put(`/lost-reports/${id}`, updatedFields);
+  },
+
+  // --- SIMULATOR CONFIG ---
+  getSimulatorConfig: async () => {
+    return await api.get("/simulator/config");
+  },
+
+  updateSimulatorConfig: async (config) => {
+    return await api.post("/simulator/config", config);
   }
 };
 
